@@ -1,7 +1,0 @@
-phase,drug_name,total_enrolled,total_completed,total_dropouts,dropout_rate_%,total_ae,mild_ae,severe_ae,ae_rate_%,decision,reason
-Phase 1,DrugX-2026,60,57,3,5.0,19,17,2,31.7,GO,All thresholds passed. Trial outcome positive.
-Phase 2,DrugX-2026,162,131,31,19.1,39,32,7,24.1,GO,All thresholds passed. Trial outcome positive.
-Phase 3,DrugX-2026,1379,1249,130,9.4,138,100,38,10.0,GO,All thresholds passed. Trial outcome positive.
-Phase 1,CureMax-001,78,73,5,6.4,29,20,9,37.2,NO-GO,Adverse event rate 37.2% exceeds maximum allowed 35.0%
-Phase 1,FailSafe-Test,59,56,3,5.1,15,12,3,25.4,GO,All thresholds passed. Trial outcome positive.
-Phase 2,FailSafe-Test,210,166,44,21.0,57,48,9,27.1,NO-GO,Adverse event rate 27.1% exceeds maximum allowed 25.0%
