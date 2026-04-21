@@ -1,0 +1,7 @@
+phase,drug_name,total_enrolled,total_completed,total_dropouts,dropout_rate_%,adverse_events,adverse_event_rate_%,decision
+Phase 1,DrugX-2026,60,58,2,3.3,19,31.7,GO
+Phase 2,DrugX-2026,271,239,32,11.8,43,15.9,GO
+Phase 3,DrugX-2026,1659,1503,156,9.4,139,8.4,GO
+Phase 1,CureMax-Phase1,31,29,2,6.5,12,38.7,GO
+Phase 2,CureMax-Phase1,243,202,41,16.9,44,18.1,GO
+Phase 3,CureMax-Phase1,2652,2388,264,10.0,229,8.6,GO
