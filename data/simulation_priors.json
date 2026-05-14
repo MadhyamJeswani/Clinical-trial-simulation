@@ -1,0 +1,163 @@
+{
+  "cancer": {
+    "Phase 1": {
+      "success_rate": 0.7405,
+      "ae_rate": 0.345,
+      "dropout_rate": 0.055,
+      "sample_size": 9558,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.7042,
+      "ae_rate": 0.23,
+      "dropout_rate": 0.165,
+      "sample_size": 18147,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.7794,
+      "ae_rate": 0.115,
+      "dropout_rate": 0.11,
+      "sample_size": 4519,
+      "data_driven": true
+    }
+  },
+  "infectious": {
+    "Phase 1": {
+      "success_rate": 0.8943,
+      "ae_rate": 0.285,
+      "dropout_rate": 0.0475,
+      "sample_size": 3114,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.808,
+      "ae_rate": 0.19,
+      "dropout_rate": 0.1425,
+      "sample_size": 4125,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.8512,
+      "ae_rate": 0.095,
+      "dropout_rate": 0.095,
+      "sample_size": 3554,
+      "data_driven": true
+    }
+  },
+  "cardiovascular": {
+    "Phase 1": {
+      "success_rate": 0.8485,
+      "ae_rate": 0.315,
+      "dropout_rate": 0.0525,
+      "sample_size": 931,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.7708,
+      "ae_rate": 0.21,
+      "dropout_rate": 0.1575,
+      "sample_size": 1667,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.8286,
+      "ae_rate": 0.105,
+      "dropout_rate": 0.105,
+      "sample_size": 1879,
+      "data_driven": true
+    }
+  },
+  "diabetes": {
+    "Phase 1": {
+      "success_rate": 0.9176,
+      "ae_rate": 0.27,
+      "dropout_rate": 0.045,
+      "sample_size": 1505,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.8259,
+      "ae_rate": 0.18,
+      "dropout_rate": 0.135,
+      "sample_size": 1677,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.8602,
+      "ae_rate": 0.09,
+      "dropout_rate": 0.09,
+      "sample_size": 1931,
+      "data_driven": true
+    }
+  },
+  "mental_health": {
+    "Phase 1": {
+      "success_rate": 0.8612,
+      "ae_rate": 0.33,
+      "dropout_rate": 0.0625,
+      "sample_size": 944,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.8203,
+      "ae_rate": 0.22,
+      "dropout_rate": 0.1875,
+      "sample_size": 1274,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.8339,
+      "ae_rate": 0.11,
+      "dropout_rate": 0.125,
+      "sample_size": 1234,
+      "data_driven": true
+    }
+  },
+  "healthy": {
+    "Phase 1": {
+      "success_rate": 0.9498,
+      "ae_rate": 0.255,
+      "dropout_rate": 0.04,
+      "sample_size": 8304,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.9148,
+      "ae_rate": 0.17,
+      "dropout_rate": 0.12,
+      "sample_size": 352,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.9453,
+      "ae_rate": 0.085,
+      "dropout_rate": 0.08,
+      "sample_size": 201,
+      "data_driven": true
+    }
+  },
+  "general": {
+    "Phase 1": {
+      "success_rate": 0.8546,
+      "ae_rate": 0.3,
+      "dropout_rate": 0.05,
+      "sample_size": 36111,
+      "data_driven": true
+    },
+    "Phase 2": {
+      "success_rate": 0.7688,
+      "ae_rate": 0.2,
+      "dropout_rate": 0.15,
+      "sample_size": 48020,
+      "data_driven": true
+    },
+    "Phase 3": {
+      "success_rate": 0.8421,
+      "ae_rate": 0.1,
+      "dropout_rate": 0.1,
+      "sample_size": 32260,
+      "data_driven": true
+    }
+  }
+}

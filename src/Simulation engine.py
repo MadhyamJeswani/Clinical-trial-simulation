@@ -1,351 +1,464 @@
 # ============================================================
 # CLINICAL TRIAL SIMULATION - CAPGEMINI INTERNSHIP 2026
 # File: simulation_engine.py
-# Purpose: Improved Clinical Trial Simulation Engine
-#          - Threshold based go/no-go decisions
-#          - Adverse events influence dropouts
+# Purpose: Upgraded simulation engine v3
+#          - Uses real historical priors
+#          - Integrates synthetic patient generator
+#          - Simulates efficacy scores
 #          - Phase learnings carry forward
+#          - Threshold based GO/NO-GO
 # Author: Madhyam
 # ============================================================
 
-# ============================================================
-# STEP 1: Import libraries
-# ============================================================
 import random
 import numpy as np
 import pandas as pd
+import json
+from scipy import stats
+from patient_generator import PatientGenerator
 
 random.seed(42)
 np.random.seed(42)
 
+print("✅ Simulation engine v3 libraries imported!")
+
 # ============================================================
-# STEP 2: Phase Parameters
-# These are BASE parameters - they will be adjusted
-# dynamically based on what happens in previous phases!
+# STEP 1: Load real historical priors
 # ============================================================
-PHASE_PARAMS = {
+def load_priors(disease='general'):
+    """Load real data-driven priors from JSON."""
+    try:
+        with open('../data/simulation_priors.json',
+                  'r') as f:
+            all_priors = json.load(f)
+        priors = all_priors.get(
+            disease,
+            all_priors['general']
+        )
+        print(f"✅ Loaded real priors for: {disease}")
+        return priors
+    except FileNotFoundError:
+        print("⚠️ Priors file not found. "
+              "Using defaults.")
+        return None
+
+# ============================================================
+# STEP 2: Safety thresholds
+# ============================================================
+SAFETY_THRESHOLDS = {
     'Phase 1': {
-        'min_patients': 20,
-        'max_patients': 80,
-        'success_rate': 0.63,
-        'base_dropout_rate': 0.05,
-        'base_adverse_event_rate': 0.30,
-        # THRESHOLDS - if exceeded, automatic NO-GO
-        'max_allowed_adverse_rate': 0.35,  # 35% max AE allowed
-        'max_allowed_dropout_rate': 0.25,  # 25% max dropout allowed
-        # How much an adverse event increases dropout chance
+        'max_ae_rate': 0.35,
+        'max_dropout_rate': 0.25,
+        'min_response_rate': 0.20,
         'ae_dropout_multiplier': 2.0
     },
     'Phase 2': {
-        'min_patients': 100,
-        'max_patients': 300,
-        'success_rate': 0.77,
-        'base_dropout_rate': 0.15,
-        'base_adverse_event_rate': 0.20,
-        'max_allowed_adverse_rate': 0.25,
-        'max_allowed_dropout_rate': 0.30,
+        'max_ae_rate': 0.25,
+        'max_dropout_rate': 0.30,
+        'min_response_rate': 0.30,
         'ae_dropout_multiplier': 1.8
     },
     'Phase 3': {
-        'min_patients': 1000,
-        'max_patients': 3000,
-        'success_rate': 0.84,
-        'base_dropout_rate': 0.10,
-        'base_adverse_event_rate': 0.10,
-        'max_allowed_adverse_rate': 0.15,
-        'max_allowed_dropout_rate': 0.20,
+        'max_ae_rate': 0.15,
+        'max_dropout_rate': 0.20,
+        'min_response_rate': 0.40,
         'ae_dropout_multiplier': 1.5
     }
 }
 
 # ============================================================
-# STEP 3: Patient Class (Improved)
-# Now adverse events directly influence dropout probability
-# ============================================================
-class Patient:
-
-    def __init__(self, patient_id, phase):
-        self.patient_id = patient_id
-        self.phase = phase
-        self.age = random.randint(18, 75)
-        self.enrolled = True
-        self.dropped_out = False
-        self.had_adverse_event = False
-        self.completed = False
-        # NEW: severity of adverse event (0=none, 1=mild, 2=severe)
-        self.ae_severity = 0
-
-    def simulate_adverse_event(self, adverse_event_rate):
-        # Simulate whether patient has adverse event
-        if random.random() < adverse_event_rate:
-            self.had_adverse_event = True
-            # Randomly assign severity
-            # 70% chance mild, 30% chance severe
-            self.ae_severity = 1 if random.random() < 0.70 else 2
-
-    def simulate_dropout(self, base_dropout_rate, ae_dropout_multiplier):
-        # NEW LOGIC: adverse events INCREASE dropout probability!
-        # If patient had severe AE → much higher dropout chance
-        # If patient had mild AE → slightly higher dropout chance
-        # If no AE → normal dropout chance
-
-        if self.ae_severity == 2:
-            # Severe adverse event → multiply dropout rate significantly
-            effective_dropout_rate = (base_dropout_rate *
-                                     ae_dropout_multiplier * 2)
-        elif self.ae_severity == 1:
-            # Mild adverse event → multiply dropout rate slightly
-            effective_dropout_rate = (base_dropout_rate *
-                                     ae_dropout_multiplier)
-        else:
-            # No adverse event → normal dropout rate
-            effective_dropout_rate = base_dropout_rate
-
-        # Cap dropout rate at 95% maximum
-        # (some patients always stay no matter what)
-        effective_dropout_rate = min(effective_dropout_rate, 0.95)
-
-        if random.random() < effective_dropout_rate:
-            self.dropped_out = True
-            self.enrolled = False
-
-    def __repr__(self):
-        severity_text = ['None', 'Mild', 'Severe'][self.ae_severity]
-        return (f"Patient {self.patient_id} | "
-                f"Age: {self.age} | "
-                f"AE: {severity_text} | "
-                f"Dropped Out: {self.dropped_out}")
-
-# ============================================================
-# STEP 4: Phase Learnings class
-# This carries important information from one phase to the next
+# STEP 3: PhaseLearnings class
+# Carries insights between phases
 # ============================================================
 class PhaseLearnings:
-    # This class acts as a MEMORY between phases
-    # Whatever happened in Phase 1 is remembered and
-    # used to adjust Phase 2 and Phase 3
 
     def __init__(self):
-        self.previous_ae_rate = None      # AE rate from last phase
-        self.previous_dropout_rate = None # dropout rate from last phase
-        self.adjustment_factor = 1.0      # how much to adjust next phase
-        self.warnings = []                # list of warnings to carry forward
+        self.previous_ae_rate = None
+        self.previous_dropout_rate = None
+        self.previous_response_rate = None
+        self.adjustment_factor = 1.0
+        self.warnings = []
+        self.phase_history = []
 
-    def update(self, ae_rate, dropout_rate, phase_name):
-        # Called after each phase completes
-        # Updates the learnings for next phase
-
+    def update(self, ae_rate, dropout_rate,
+               response_rate, phase_name):
         self.previous_ae_rate = ae_rate
         self.previous_dropout_rate = dropout_rate
+        self.previous_response_rate = response_rate
         self.warnings = []
 
-        print(f"\n  📚 PHASE LEARNINGS FROM {phase_name}:")
+        # Store phase history
+        self.phase_history.append({
+            'phase': phase_name,
+            'ae_rate': ae_rate,
+            'dropout_rate': dropout_rate,
+            'response_rate': response_rate
+        })
 
-        # If previous phase had HIGH adverse events
-        # → next phase will be MORE CAUTIOUS
+        print(f"\n  📚 LEARNINGS FROM {phase_name}:")
+
+        # AE adjustment
         if ae_rate > 0.25:
             self.adjustment_factor = 1.3
-            warning = (f"⚠️  High AE rate ({ae_rate*100:.1f}%) detected! "
-                      f"Next phase will increase monitoring intensity.")
-            self.warnings.append(warning)
-            print(f"  {warning}")
-
-        # If previous phase had LOW adverse events
-        # → next phase can be slightly more relaxed
+            w = (f"⚠️  High AE ({ae_rate*100:.1f}%) "
+                 f"→ Phase {len(self.phase_history)+1} "
+                 f"increases monitoring")
+            self.warnings.append(w)
+            print(f"  {w}")
         elif ae_rate < 0.10:
-            self.adjustment_factor = 0.8
-            msg = (f"✅ Low AE rate ({ae_rate*100:.1f}%) detected! "
-                  f"Next phase proceeds with standard monitoring.")
-            print(f"  {msg}")
-
+            self.adjustment_factor = 0.85
+            print(f"  ✅ Low AE ({ae_rate*100:.1f}%) "
+                  f"→ Proceeding with standard monitoring")
         else:
             self.adjustment_factor = 1.0
-            msg = (f"✅ Normal AE rate ({ae_rate*100:.1f}%). "
-                  f"Proceeding normally.")
-            print(f"  {msg}")
+            print(f"  ✅ Normal AE ({ae_rate*100:.1f}%) "
+                  f"→ Proceeding normally")
 
-        # If previous phase had HIGH dropouts
-        # → next phase enrolls MORE patients to compensate
+        # Response rate warning
+        if response_rate < 0.40:
+            w = (f"⚠️  Low response rate "
+                 f"({response_rate*100:.1f}%) "
+                 f"→ Consider dose adjustment")
+            self.warnings.append(w)
+            print(f"  {w}")
+
+        # Dropout warning
         if dropout_rate > 0.20:
-            warning = (f"⚠️  High dropout rate ({dropout_rate*100:.1f}%)! "
-                      f"Next phase will enroll extra patients.")
-            self.warnings.append(warning)
-            print(f"  {warning}")
+            w = (f"⚠️  High dropout "
+                 f"({dropout_rate*100:.1f}%) "
+                 f"→ Next phase enrolls extra patients")
+            self.warnings.append(w)
+            print(f"  {w}")
 
 # ============================================================
-# STEP 5: Improved simulate_phase function
-# Now uses learnings from previous phase!
+# STEP 4: Core simulation function
 # ============================================================
-def simulate_phase(phase_name, drug_name, learnings):
+def simulate_phase(phase_name, drug_name,
+                   disease_category, learnings,
+                   priors):
+    """
+    Simulates one complete clinical trial phase.
+    Now uses:
+    - Real historical priors
+    - Synthetic patient generator
+    - Efficacy simulation
+    - Phase learnings
+    """
 
     print(f"\n{'='*60}")
-    print(f"  SIMULATING {phase_name.upper()} — Drug: {drug_name}")
+    print(f"  SIMULATING {phase_name.upper()}")
+    print(f"  Drug: {drug_name} | "
+          f"Disease: {disease_category}")
     print(f"{'='*60}")
 
-    params = PHASE_PARAMS[phase_name]
+    thresholds = SAFETY_THRESHOLDS[phase_name]
+    phase_priors = priors.get(phase_name, {})
 
-    # --------------------------------------------------------
-    # Apply learnings from previous phase
-    # --------------------------------------------------------
-    # Adjust adverse event rate based on previous phase
-    adjusted_ae_rate = (params['base_adverse_event_rate'] *
-                       learnings.adjustment_factor)
+    # Get data-driven rates
+    base_ae_rate = phase_priors.get(
+        'ae_rate', 0.25)
+    base_dropout_rate = phase_priors.get(
+        'dropout_rate', 0.10)
+    base_success_rate = phase_priors.get(
+        'success_rate', 0.75)
 
-    # If previous phase had high dropouts → enroll more patients
-    extra_enrollment = 0
+    # Apply learnings adjustment
+    adjusted_ae_rate = (base_ae_rate *
+                        learnings.adjustment_factor)
+    adjusted_ae_rate = min(adjusted_ae_rate, 0.45)
+
+    # Patient enrollment numbers per phase
+    enrollment_ranges = {
+        'Phase 1': (20, 80),
+        'Phase 2': (100, 300),
+        'Phase 3': (1000, 3000)
+    }
+
+    min_p, max_p = enrollment_ranges[phase_name]
+
+    # Extra enrollment if previous dropout was high
+    extra = 0
     if (learnings.previous_dropout_rate and
             learnings.previous_dropout_rate > 0.20):
-        extra_enrollment = int(params['min_patients'] * 0.20)
-        print(f"  📈 Enrolling {extra_enrollment} extra patients "
-              f"due to high dropout in previous phase")
+        extra = int(min_p * 0.20)
+        print(f"  📈 +{extra} extra patients "
+              f"(high previous dropout)")
 
-    # Decide enrollment count
-    num_patients = (random.randint(
-        params['min_patients'],
-        params['max_patients']
-    ) + extra_enrollment)
+    num_patients = random.randint(
+        min_p, max_p) + extra
 
     print(f"  Enrolling {num_patients} patients...")
-    print(f"  Adjusted AE monitoring rate: "
+    print(f"  AE rate (data-driven): "
           f"{adjusted_ae_rate*100:.1f}%")
+    print(f"  Success rate prior: "
+          f"{base_success_rate*100:.1f}%")
 
-    # --------------------------------------------------------
-    # Create and simulate all patients
-    # --------------------------------------------------------
-    patients = []
-    for i in range(num_patients):
-        patient = Patient(
-            patient_id=f"P{str(i+1).zfill(4)}",
-            phase=phase_name
-        )
+    # ── Generate synthetic patients ──────────────────
+    generator = PatientGenerator(
+        disease_category=disease_category,
+        phase=phase_name
+    )
+    patients = generator.generate_cohort(num_patients)
 
-        # STEP A: First simulate adverse event
-        patient.simulate_adverse_event(adjusted_ae_rate)
+    # ── Simulate each patient's journey ─────────────
+    for patient in patients:
 
-        # STEP B: Then simulate dropout
-        # (dropout is NOW influenced by adverse event!)
-        patient.simulate_dropout(
-            params['base_dropout_rate'],
-            params['ae_dropout_multiplier']
-        )
+        # 1. Simulate adverse event
+        if random.random() < adjusted_ae_rate:
+            patient.had_adverse_event = True
+            patient.ae_severity = (
+                1 if random.random() < 0.70 else 2)
+            # Add AE description
+            ae_types = {
+                'cancer': ['Nausea', 'Fatigue',
+                           'Neutropenia',
+                           'Alopecia', 'Vomiting'],
+                'infectious': ['Fever', 'Rash',
+                               'Liver enzyme elevation'],
+                'cardiovascular': ['Hypotension',
+                                   'Bradycardia',
+                                   'Oedema'],
+                'general': ['Headache', 'Dizziness',
+                            'Fatigue', 'Nausea']
+            }
+            ae_list = ae_types.get(
+                disease_category,
+                ae_types['general'])
+            patient.ae_description = random.choice(
+                ae_list)
 
-        # STEP C: If not dropped out → completed
-        if not patient.dropped_out:
+        # 2. Simulate dropout (AE influences dropout!)
+        if patient.ae_severity == 2:
+            eff_dropout = (base_dropout_rate *
+                          thresholds[
+                              'ae_dropout_multiplier'
+                          ] * 2)
+        elif patient.ae_severity == 1:
+            eff_dropout = (base_dropout_rate *
+                          thresholds[
+                              'ae_dropout_multiplier'
+                          ])
+        else:
+            eff_dropout = base_dropout_rate
+
+        eff_dropout = min(eff_dropout, 0.95)
+
+        if random.random() < eff_dropout:
+            patient.dropped_out = True
+            patient.enrolled = False
+        else:
             patient.completed = True
 
-        patients.append(patient)
+    # ── Calculate phase results ──────────────────────
+    total = len(patients)
+    dropouts = sum(1 for p in patients
+                   if p.dropped_out)
+    completed = sum(1 for p in patients
+                    if p.completed)
+    ae_count = sum(1 for p in patients
+                   if p.had_adverse_event)
+    mild_ae = sum(1 for p in patients
+                  if p.ae_severity == 1)
+    severe_ae = sum(1 for p in patients
+                    if p.ae_severity == 2)
 
-    # --------------------------------------------------------
-    # Calculate results
-    # --------------------------------------------------------
-    total_enrolled = len(patients)
-    total_dropouts = sum(1 for p in patients if p.dropped_out)
-    total_completed = sum(1 for p in patients if p.completed)
-    total_ae = sum(1 for p in patients if p.had_adverse_event)
-    total_severe_ae = sum(1 for p in patients if p.ae_severity == 2)
-    total_mild_ae = sum(1 for p in patients if p.ae_severity == 1)
+    # Efficacy calculations (NEW!)
+    completers = [p for p in patients
+                  if p.completed]
+    if completers:
+        response_rate = np.mean([
+            p.drug_response_score
+            for p in completers
+        ])
+        endpoint_rate = np.mean([
+            int(p.endpoint_achieved)
+            for p in completers
+        ])
+        avg_baseline = np.mean([
+            p.baseline_score for p in completers
+        ])
+        avg_followup = np.mean([
+            p.followup_score for p in completers
+        ])
 
-    actual_dropout_rate = round(total_dropouts / total_enrolled, 3)
-    actual_ae_rate = round(total_ae / total_enrolled, 3)
+        # Calculate p-value (t-test baseline vs followup)
+        if len(completers) > 1:
+            baselines = [p.baseline_score
+                         for p in completers]
+            followups = [p.followup_score
+                         for p in completers]
+            t_stat, p_value = stats.ttest_rel(
+                baselines, followups)
+            p_value = round(p_value, 4)
+        else:
+            p_value = 1.0
+    else:
+        response_rate = 0.0
+        endpoint_rate = 0.0
+        avg_baseline = 0.0
+        avg_followup = 0.0
+        p_value = 1.0
 
-    # --------------------------------------------------------
-    # Print detailed results
-    # --------------------------------------------------------
+    # Patient demographics summary
+    ages = [p.age for p in patients]
+    females = sum(1 for p in patients
+                  if p.gender == 'Female')
+
+    actual_ae_rate = round(ae_count / total, 3)
+    actual_dropout_rate = round(dropouts / total, 3)
+    actual_response_rate = round(response_rate, 3)
+
+    # ── Print results ────────────────────────────────
     print(f"\n  📊 PHASE RESULTS:")
-    print(f"  Total Patients Enrolled  : {total_enrolled}")
-    print(f"  Completed Trial          : {total_completed}")
-    print(f"  Dropped Out              : {total_dropouts} "
+    print(f"  Enrolled        : {total}")
+    print(f"  Completed       : {completed}")
+    print(f"  Dropped out     : {dropouts} "
           f"({actual_dropout_rate*100:.1f}%)")
-    print(f"  Total Adverse Events     : {total_ae} "
+    print(f"  Adverse Events  : {ae_count} "
           f"({actual_ae_rate*100:.1f}%)")
-    print(f"    → Mild AE              : {total_mild_ae}")
-    print(f"    → Severe AE            : {total_severe_ae}")
+    print(f"    Mild AE       : {mild_ae}")
+    print(f"    Severe AE     : {severe_ae}")
+    print(f"\n  📈 EFFICACY RESULTS:")
+    print(f"  Response Rate   : "
+          f"{actual_response_rate*100:.1f}%")
+    print(f"  Endpoint Rate   : "
+          f"{endpoint_rate*100:.1f}%")
+    print(f"  Baseline Score  : {avg_baseline:.1f}")
+    print(f"  Followup Score  : {avg_followup:.1f}")
+    print(f"  Improvement     : "
+          f"{((avg_baseline-avg_followup)/avg_baseline*100):.1f}%")
+    print(f"  P-value         : {p_value} "
+          f"({'✅ Significant' if p_value < 0.05 else '❌ Not significant'})")
+    print(f"\n  👥 DEMOGRAPHICS:")
+    print(f"  Age mean        : {np.mean(ages):.1f} yrs")
+    print(f"  Female/Male     : {females}/{total-females}")
 
-    # --------------------------------------------------------
-    # THRESHOLD BASED GO/NO-GO DECISION
-    # This is the KEY improvement!
-    # We now check thresholds FIRST before random probability
-    # --------------------------------------------------------
-    print(f"\n  🎯 GO/NO-GO DECISION ANALYSIS:")
-    print(f"  Adverse Event Rate : {actual_ae_rate*100:.1f}% "
-          f"(max allowed: "
-          f"{params['max_allowed_adverse_rate']*100:.1f}%)")
-    print(f"  Dropout Rate       : {actual_dropout_rate*100:.1f}% "
-          f"(max allowed: "
-          f"{params['max_allowed_dropout_rate']*100:.1f}%)")
+    # ── GO/NO-GO Decision ────────────────────────────
+    print(f"\n  🎯 GO/NO-GO ANALYSIS:")
+    print(f"  AE rate      : {actual_ae_rate*100:.1f}% "
+          f"(max: {thresholds['max_ae_rate']*100:.0f}%)")
+    print(f"  Dropout rate : "
+          f"{actual_dropout_rate*100:.1f}% "
+          f"(max: {thresholds['max_dropout_rate']*100:.0f}%)")
+    print(f"  Response rate: "
+          f"{actual_response_rate*100:.1f}% "
+          f"(min: "
+          f"{thresholds['min_response_rate']*100:.0f}%)")
 
-    # Check thresholds first
-    if actual_ae_rate > params['max_allowed_adverse_rate']:
+    # Decision logic
+    if actual_ae_rate > thresholds['max_ae_rate']:
         decision = "NO-GO"
-        reason = (f"Adverse event rate {actual_ae_rate*100:.1f}% "
-                 f"exceeds maximum allowed "
-                 f"{params['max_allowed_adverse_rate']*100:.1f}%")
-        print(f"\n  ❌ NO-GO! Threshold breached!")
-        print(f"  Reason: {reason}")
+        reason = (f"AE rate {actual_ae_rate*100:.1f}% "
+                  f"exceeds threshold "
+                  f"{thresholds['max_ae_rate']*100:.0f}%")
 
-    elif actual_dropout_rate > params['max_allowed_dropout_rate']:
+    elif (actual_dropout_rate >
+          thresholds['max_dropout_rate']):
         decision = "NO-GO"
-        reason = (f"Dropout rate {actual_dropout_rate*100:.1f}% "
-                 f"exceeds maximum allowed "
-                 f"{params['max_allowed_dropout_rate']*100:.1f}%")
-        print(f"\n  ❌ NO-GO! Threshold breached!")
-        print(f"  Reason: {reason}")
+        reason = (f"Dropout {actual_dropout_rate*100:.1f}%"
+                  f" exceeds threshold "
+                  f"{thresholds['max_dropout_rate']*100:.0f}%")
+
+    elif (actual_response_rate <
+          thresholds['min_response_rate'] and
+          phase_name != 'Phase 1'):
+        decision = "NO-GO"
+        reason = (f"Response rate "
+                  f"{actual_response_rate*100:.1f}% "
+                  f"below minimum "
+                  f"{thresholds['min_response_rate']*100:.0f}%")
 
     else:
-        # Thresholds passed → now use probability
-        trial_succeeded = random.random() < params['success_rate']
-        if trial_succeeded:
+        # Probability based on data-driven success rate
+        if random.random() < base_success_rate:
             decision = "GO"
-            reason = "All thresholds passed. Trial outcome positive."
-            print(f"\n  ✅ GO! {phase_name} PASSED!")
-            print(f"  Drug '{drug_name}' proceeds to next phase.")
+            reason = ("All thresholds passed. "
+                      "Trial outcome positive.")
         else:
             decision = "NO-GO"
-            reason = "Thresholds passed but trial outcome negative."
-            print(f"\n  ❌ NO-GO! {phase_name} FAILED!")
-            print(f"  Drug '{drug_name}' cannot proceed.")
+            reason = ("Thresholds passed but "
+                      "trial outcome negative.")
 
-    # --------------------------------------------------------
-    # Update learnings for next phase
-    # --------------------------------------------------------
-    learnings.update(actual_ae_rate, actual_dropout_rate, phase_name)
+    if decision == "GO":
+        print(f"\n  ✅ GO! {phase_name} PASSED!")
+    else:
+        print(f"\n  ❌ NO-GO! {phase_name} FAILED!")
+    print(f"  Reason: {reason}")
 
-    # --------------------------------------------------------
-    # Return results
-    # --------------------------------------------------------
+    # Update learnings
+    learnings.update(
+        actual_ae_rate,
+        actual_dropout_rate,
+        actual_response_rate,
+        phase_name
+    )
+
+    # ── Return complete results ──────────────────────
     return {
         'phase': phase_name,
         'drug_name': drug_name,
-        'total_enrolled': total_enrolled,
-        'total_completed': total_completed,
-        'total_dropouts': total_dropouts,
-        'dropout_rate_%': round(actual_dropout_rate * 100, 1),
-        'total_ae': total_ae,
-        'mild_ae': total_mild_ae,
-        'severe_ae': total_severe_ae,
+        'disease_category': disease_category,
+        'total_enrolled': total,
+        'total_completed': completed,
+        'total_dropouts': dropouts,
+        'dropout_rate_%': round(
+            actual_dropout_rate * 100, 1),
+        'total_ae': ae_count,
+        'mild_ae': mild_ae,
+        'severe_ae': severe_ae,
         'ae_rate_%': round(actual_ae_rate * 100, 1),
+        'response_rate_%': round(
+            actual_response_rate * 100, 1),
+        'endpoint_rate_%': round(
+            endpoint_rate * 100, 1),
+        'avg_baseline_score': round(avg_baseline, 1),
+        'avg_followup_score': round(avg_followup, 1),
+        'improvement_%': round(
+            (avg_baseline - avg_followup) /
+            avg_baseline * 100
+            if avg_baseline > 0 else 0, 1),
+        'p_value': p_value,
+        'statistically_significant': p_value < 0.05,
+        'age_mean': round(np.mean(ages), 1),
+        'female_count': females,
+        'male_count': total - females,
         'decision': decision,
-        'reason': reason
+        'reason': reason,
+        'warnings': learnings.warnings.copy()
     }
 
 # ============================================================
-# STEP 6: Full Trial Simulation (Improved)
+# STEP 5: Full trial simulation
 # ============================================================
-def run_full_trial(drug_name):
+def run_full_trial(drug_name,
+                   disease_category='general'):
+    """
+    Runs complete Phase 1 → 2 → 3 simulation.
+    Uses real priors + synthetic patients + efficacy.
+    """
 
     print(f"\n{'#'*60}")
-    print(f"  FULL CLINICAL TRIAL SIMULATION")
+    print(f"  CLINICAL TRIAL SIMULATION v3")
     print(f"  Drug: {drug_name}")
+    print(f"  Disease: {disease_category}")
     print(f"{'#'*60}")
 
-    all_results = []
+    # Load real priors for this disease
+    priors = load_priors(disease_category)
+    if priors is None:
+        priors = load_priors('general')
 
-    # Create a fresh learnings object for this trial
-    # It starts empty and gets filled after each phase
+    all_results = []
     learnings = PhaseLearnings()
 
     for phase in ['Phase 1', 'Phase 2', 'Phase 3']:
-        result = simulate_phase(phase, drug_name, learnings)
+        result = simulate_phase(
+            phase_name=phase,
+            drug_name=drug_name,
+            disease_category=disease_category,
+            learnings=learnings,
+            priors=priors
+        )
         all_results.append(result)
 
         if result['decision'] == 'NO-GO':
@@ -354,45 +467,66 @@ def run_full_trial(drug_name):
             break
 
     # Final verdict
-    if len(all_results) == 3 and all_results[-1]['decision'] == 'GO':
+    if (len(all_results) == 3 and
+            all_results[-1]['decision'] == 'GO'):
         print(f"\n🏆 TRIAL COMPLETE!")
-        print(f"   Drug '{drug_name}' passed all 3 phases!")
-        print(f"   Recommended for regulatory approval!")
-    elif all_results[-1]['decision'] == 'NO-GO':
-        stopped_at = all_results[-1]['phase']
-        print(f"\n💊 Drug '{drug_name}' discontinued at {stopped_at}")
+        print(f"   Drug '{drug_name}' passed "
+              f"all 3 phases!")
+        print(f"   Recommended for regulatory "
+              f"approval!")
+    else:
+        stopped = all_results[-1]['phase']
+        print(f"\n💊 '{drug_name}' discontinued "
+              f"at {stopped}")
 
-    # Print summary table
+    # Summary table
     results_df = pd.DataFrame(all_results)
     print(f"\n📋 TRIAL SUMMARY:")
-    print(results_df[[
-        'phase', 'total_enrolled', 'dropout_rate_%',
-        'ae_rate_%', 'decision', 'reason'
-    ]].to_string(index=False))
+    cols = ['phase', 'total_enrolled',
+            'ae_rate_%', 'dropout_rate_%',
+            'response_rate_%', 'p_value',
+            'decision']
+    print(results_df[cols].to_string(index=False))
 
-    return results_df
+    return all_results
 
 # ============================================================
-# STEP 7: Run simulations
+# STEP 6: Run test simulations
 # ============================================================
 if __name__ == "__main__":
 
-    print("🔬 CLINICAL TRIAL SIMULATION SYSTEM v2.0")
+    print("🔬 CLINICAL TRIAL SIMULATION SYSTEM v3")
     print("   Capgemini Internship 2026 — Madhyam")
-    print("   Improved: Threshold decisions + AE→Dropout + "
-          "Phase learnings")
+    print("   Real priors + Synthetic patients "
+          "+ Efficacy")
 
-    # Simulate 3 different drugs
-    results1 = run_full_trial("DrugX-2026")
+    # Test 1: Cancer drug
+    results_cancer = run_full_trial(
+        drug_name="OncoCure-X1",
+        disease_category="cancer"
+    )
+
     print("\n" + "="*60)
 
-    results2 = run_full_trial("CureMax-001")
+    # Test 2: Infectious disease drug
+    results_infect = run_full_trial(
+        drug_name="InfectoShield-V2",
+        disease_category="infectious"
+    )
+
     print("\n" + "="*60)
 
-    results3 = run_full_trial("FailSafe-Test")
-    print("\n" + "="*60)
+    # Save results
+    all_results = pd.DataFrame(
+        results_cancer + results_infect
+    )
+    all_results.to_csv(
+        '../data/simulation_results_v3.csv',
+        index=False
+    )
+    print("\n✅ Results saved to "
+          "simulation_results_v3.csv!")
 
-    # Save all results
-    all_results = pd.concat([results1, results2, results3])
-    all_results.to_csv('../data/simulation_results_v2.csv', index=False)
-    print("\n✅ All results saved to simulation_results_v2.csv!")
+    print("\n" + "="*60)
+    print("SIMULATION ENGINE v3 COMPLETE!")
+    print("="*60)
