@@ -16,7 +16,7 @@ import pandas as pd
 import json
 from scipy import stats
 from patient_generator import PatientGenerator
-
+import os
 random.seed(42)
 np.random.seed(42)
 
@@ -28,8 +28,10 @@ print("✅ Simulation engine v3 libraries imported!")
 def load_priors(disease='general'):
     """Load real data-driven priors from JSON."""
     try:
-        with open('../data/simulation_priors.json',
-                  'r') as f:
+        # Find data folder relative to this file's location
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_path = os.path.join(base_dir, '..', 'data', 'simulation_priors.json')
+        with open(data_path, 'r') as f:
             all_priors = json.load(f)
         priors = all_priors.get(
             disease,
