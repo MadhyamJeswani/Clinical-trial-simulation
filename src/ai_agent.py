@@ -36,6 +36,8 @@ possible_paths = [
 
 for env_path in possible_paths:
     if env_path.exists():
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        env_path = os.path.join(base_dir, '..', '.env')
         load_dotenv(dotenv_path=env_path)
         break
 
@@ -47,7 +49,8 @@ print("✅ Libraries imported!")
 api_key = os.getenv('GROQ_API_KEY')
 if not api_key:
     # Hardcode as fallback for dashboard
-    api_key = REMOVED_GROQ_KEY
+    api_key = os.getenv('GROQ_API_KEY')
+
 
 else:
     client = Groq(api_key=api_key)

@@ -372,17 +372,38 @@ if run_btn:
                 org_class,
                 results
             )
+        # --------------------------------------------------------
+        # COMPARISON TRIAL (Drug 2)
+        # --------------------------------------------------------
+    results2 = None
+    aria_results2 = None
 
+    if compare_mode:
+        with st.spinner(
+                f"Running Trial for {drug_name_2}..."):
+            results2 = execute_trial(
+                drug_name_2,
+                disease_2
+            )
+
+        if enable_aria and results2:
+            with st.spinner(
+                    "Dr. ARIA analyzing Drug 2..."):
+                aria_results2 = execute_aria(
+                    drug_name_2,
+                    disease_2,
+                    org_class_2,
+                    results2
+                )
     # --------------------------------------------------------
     # TABS
     # --------------------------------------------------------
 
-    tabs = st.tabs([
-        "Overview",
-        "Safety",
-        "Efficacy",
-        "ARIA"
-    ])
+    tab_list = ["Overview", "Safety", "Efficacy", "ARIA"]
+    if compare_mode and results2:
+        tab_list.append("🔄 Comparison")
+
+    tabs = st.tabs(tab_list)
 
     # ========================================================
     # OVERVIEW TAB
@@ -534,7 +555,178 @@ if run_btn:
 
                         for f in findings:
                             st.write(f"• {f}")
+# ========================================================
+# COMPARISON TAB
+# ========================================================
+if compare_mode and 'results2' in dir() and results2:
+    with tabs[4]:
+        st.subheader(
+            f"Comparison: {drug_name} vs {drug_name_2}"
+        )
 
+        # Side by side decisions
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown(f"### 💊 {drug_name}")
+            for r in results:
+                decision = safe_get(r, 'decision')
+                color = (
+                    "green" if decision == "GO"
+                    else "red"
+                )
+                st.markdown(
+                    f"**{safe_get(r, 'phase')}**: "
+                    f":{color}[{decision}]"
+                )
+
+        with col2:
+            st.markdown(f"### 💊 {drug_name_2}")
+            for r in results2:
+                decision = safe_get(r, 'decision')
+                color = (
+                    "green" if decision == "GO"
+                    else "red"
+                )
+                st.markdown(
+                    f"**{safe_get(r, 'phase')}**: "
+                    f":{color}[{decision}]"
+                )
+
+        st.divider()
+
+        # Metrics comparison
+        st.subheader("📊 Metrics Comparison")
+
+        comp_data = {
+            'Metric': [
+                'Avg AE Rate',
+                'Avg Dropout Rate',
+                'Avg Response Rate',
+                'Avg Improvement',
+                'Total Patients',
+                'Phases Passed'
+            ],
+            drug_name: [
+                f"{calculate_average(results, 'ae_rate_%')}%",
+                f"{calculate_average(results, 'dropout_rate_%')}%",
+                f"{calculate_average(results, 'response_rate_%')}%",
+                f"{calculate_average(results, 'improvement_%')}%",
+                sum(safe_get(r, 'total_enrolled', 0) for r in results),
+                sum(1 for r in results if safe_get(r, 'decision') == 'GO')
+            ],
+            drug_name_2: [
+                f"{calculate_average(results2, 'ae_rate_%')}%",
+                f"{calculate_average(results2, 'dropout_rate_%')}%",
+                f"{calculate_average(results2, 'response_rate_%')}%",
+                f"{calculate_average(results2, 'improvement_%')}%",
+                sum(safe_get(r, 'total_enrolled', 0) for r in results2),
+                sum(1 for r in results2 if safe_get(r, 'decision') == 'GO')
+            ]
+        }
+
+        st.dataframe(
+            pd.DataFrame(comp_data),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # Comparison charts
+        st.subheader("📈 Visual Comparison")
+        st.write("Loading charts...")
+        metrics_to_plot = [
+            ('ae_rate_%', 'AE Rate (%)'),
+            ('response_rate_%', 'Response Rate (%)'),
+            ('dropout_rate_%', 'Dropout Rate (%)')
+        ]
+
+        for metric, title in metrics_to_plot:
+            try:
+                fig = go.Figure()
+
+                # Drug 1 data
+                x1 = [r.get('phase', 'Unknown')
+                      for r in results]
+                y1 = [r.get(metric, 0)
+                      for r in results]
+
+                # Drug 2 data
+                x2 = [r.get('phase', 'Unknown')
+                      for r in results2]
+                y2 = [r.get(metric, 0)
+                      for r in results2]
+
+                fig.add_trace(go.Bar(
+                    name=drug_name,
+                    x=x1, y=y1,
+                    marker_color='#1A237E'
+                ))
+
+                fig.add_trace(go.Bar(
+                    name=drug_name_2,
+                    x=x2, y=y2,
+                    marker_color='#FF6F00'
+                ))
+
+                fig.update_layout(
+                    title=title,
+                    barmode='group',
+                    height=350,
+                    xaxis_title='Phase',
+                    yaxis_title=title,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02
+                    ),
+                    plot_bgcolor='white',
+                    paper_bgcolor='white'
+                )
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+            except Exception as e:
+                st.error(f"Chart error: {e}")
+
+            fig.add_trace(go.Bar(
+                name=drug_name_2,
+                x=[safe_get(r, 'phase')
+                   for r in results2],
+                y=[safe_get(r, metric, 0)
+                   for r in results2],
+                marker_color='#FF6F00'
+            ))
+
+            fig.update_layout(
+                title=dict(
+                    text=title,
+                    font=dict(size=16)
+                ),
+                barmode='group',
+                height=350,
+                plot_bgcolor='white',
+                paper_bgcolor='white',
+                xaxis=dict(
+                    title='Trial Phase',
+                    tickfont=dict(size=13)
+                ),
+                yaxis=dict(
+                    title=title,
+                    tickfont=dict(size=13)
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    font=dict(size=12)
+                ),
+                margin=dict(t=80, b=50, l=60, r=20)
+            )
 # ============================================================
 # WELCOME SCREEN
 # ============================================================
